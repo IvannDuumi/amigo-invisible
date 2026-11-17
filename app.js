@@ -25,6 +25,8 @@ let state = {
   sent: {}, // {giverId: true}
   drawId: null, // id aleatorio del sorteo (para registrar aperturas)
   opened: {}, // {giverId: timestamp}
+  tokens: {}, // {giverId: token corto del enlace}
+  linksUploaded: false, // los datos de los enlaces cortos ya están en Firebase
 };
 
 /* ---------------- Persistencia ---------------- */
@@ -38,6 +40,12 @@ function load() {
 
 /* ---------------- Utilidades ---------------- */
 const uid = () => Math.random().toString(36).slice(2, 9);
+function shortId(len) {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+  const a = new Uint8Array(len);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => chars[b % chars.length]).join("");
+}
 function randomId() {
   const a = new Uint8Array(12);
   crypto.getRandomValues(a);
@@ -211,8 +219,11 @@ function doDraw() {
   state.result = res;
   state.sent = {};
   state.opened = {};
-  state.drawId = randomId();
+  state.drawId = shortId(10);
+  state.tokens = Object.fromEntries(state.people.map((p) => [p.id, shortId(6)]));
+  state.linksUploaded = false;
   watchOpens();
+  syncLinks();
   save();
   renderResults();
   confetti();
@@ -221,11 +232,52 @@ function doDraw() {
 }
 
 /* ---------------- Mensajes y links ---------------- */
-function revealLink(giverId) {
+function revealPayload(giverId) {
   const g = person(giverId), r = person(state.result[giverId]);
   const ev = state.event;
-  const payload = { i: state.drawId, k: giverId, e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
-  return `${location.origin}${location.pathname}#v=${encode(payload)}`;
+  return { i: state.drawId, k: giverId, e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
+}
+
+const baseUrl = () => `${location.origin}${location.pathname}`;
+const hasShortLinks = () => DB && state.linksUploaded && state.tokens && state.tokens[state.people[0]?.id];
+
+// Enlace corto (#xxxxxxxxxxyyyyyy, datos en Firebase) o, si no se puede, enlace largo autocontenido.
+function revealLink(giverId) {
+  if (hasShortLinks() && state.tokens[giverId]) return `${baseUrl()}#${state.drawId}${state.tokens[giverId]}`;
+  return `${baseUrl()}#v=${encode(revealPayload(giverId))}`;
+}
+
+// Sube (o actualiza) los datos de cada enlace corto a Firebase.
+let syncTimer = null;
+async function syncLinks() {
+  if (!DB || !state.result || !state.tokens) return;
+  setSyncStatus("☁️ Guardando enlaces…");
+  try {
+    await Promise.all(state.people.map((p) =>
+      fetch(`${DB}/links/${state.drawId}/${state.tokens[p.id]}.json`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(encode(revealPayload(p.id))),
+      }).then((res) => { if (!res.ok) throw new Error(res.status); })
+    ));
+    state.linksUploaded = true;
+    save();
+    setSyncStatus("");
+  } catch (_) {
+    setSyncStatus(state.linksUploaded
+      ? "⚠️ No se pudieron actualizar los enlaces. Revisá la conexión."
+      : "⚠️ No se pudieron crear los enlaces cortos: se usan enlaces largos.");
+  }
+  renderResults();
+}
+function scheduleSync() {
+  if (!state.result || !DB) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(syncLinks, 1200);
+}
+function setSyncStatus(msg) {
+  const el = $("#syncStatus");
+  if (el) el.textContent = msg;
 }
 
 function waMessage(giverId) {
@@ -583,12 +635,12 @@ function showReveal(data) {
 function bind() {
   const evFields = { evName: "name", evDate: "date", evPlace: "place", evMin: "min", evMax: "max", evCur: "cur", evHost: "host" };
   Object.entries(evFields).forEach(([id, key]) => {
-    $("#" + id).addEventListener("input", (e) => { state.event[key] = e.target.value; save(); renderResults(); });
+    $("#" + id).addEventListener("input", (e) => { state.event[key] = e.target.value; save(); renderResults(); scheduleSync(); });
   });
-  $("#evRules").addEventListener("input", (e) => { state.rules = e.target.value; save(); renderResults(); });
+  $("#evRules").addEventListener("input", (e) => { state.rules = e.target.value; save(); renderResults(); scheduleSync(); });
   $("#ruleCircle").addEventListener("change", (e) => { state.circle = e.target.checked; save(); });
   $("#ruleNoSecret").addEventListener("change", (e) => { state.noSecret = e.target.checked; save(); });
-  $("#resetRules").addEventListener("click", () => { state.rules = DEFAULT_RULES.join("\n"); $("#evRules").value = state.rules; save(); });
+  $("#resetRules").addEventListener("click", () => { state.rules = DEFAULT_RULES.join("\n"); $("#evRules").value = state.rules; save(); renderResults(); scheduleSync(); });
 
   $("#addForm").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -676,8 +728,35 @@ function bind() {
     try { showReveal(decode(m[1])); return; }
     catch (_) { toast("El link parece estar roto 😕"); }
   }
+  const short = location.hash.match(/^#([A-Za-z0-9]{10})([A-Za-z0-9]{6})$/);
+  if (short && DB) {
+    $("#setup").classList.add("hidden");
+    $("#reveal").classList.remove("hidden");
+    $("#rvHello").textContent = "Cargando tu regalo…";
+    fetch(`${DB}/links/${short[1]}/${short[2]}.json`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((enc) => {
+        if (!enc) throw new Error("no encontrado");
+        showReveal(decode(enc));
+      })
+      .catch(() => {
+        $("#rvHello").textContent = "Enlace no encontrado 😕";
+        document.querySelector(".reveal-card > .reveal-sub").textContent = "Puede que el sorteo se haya hecho de nuevo. Pedile al organizador tu enlace actualizado.";
+        $("#giftBtn").classList.add("hidden");
+        document.querySelector(".tap").classList.add("hidden");
+      });
+    return;
+  }
   load();
   if (state.result && !state.drawId) { state.drawId = randomId(); save(); }
+  if (state.result && DB && !state.linksUploaded) {
+    // Sorteo hecho antes de los enlaces cortos: se les crean tokens y se suben.
+    if (!state.tokens || !state.people.every((p) => state.tokens[p.id])) {
+      state.tokens = Object.fromEntries(state.people.map((p) => [p.id, shortId(6)]));
+    }
+    save();
+    syncLinks();
+  }
   watchOpens();
   setInterval(() => state.result && renderResults(), 60000); // refresca los "hace X min"
   renderEvent();

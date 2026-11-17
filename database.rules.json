@@ -2,10 +2,19 @@
   "rules": {
     "draws": {
       "$draw": {
-        ".read": "$draw.length >= 20",
+        ".read": "$draw.length >= 10",
         "$person": {
           ".write": "!data.exists()",
           ".validate": "newData.isNumber()"
+        }
+      }
+    },
+    "links": {
+      "$draw": {
+        "$token": {
+          ".read": true,
+          ".write": "$draw.length >= 10 && $token.length >= 6",
+          ".validate": "newData.isString() && newData.val().length < 8000"
         }
       }
     }
