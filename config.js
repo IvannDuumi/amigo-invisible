@@ -2,4 +2,4 @@
    Pegá acá la URL de tu base, por ejemplo:
    "https://amigo-invisible-xxxxx-default-rtdb.firebaseio.com"
    Si queda vacío, la app funciona igual pero sin los ✅ de "ya abrió". */
-window.FIREBASE_DB_URL = "";
+window.FIREBASE_DB_URL = "https://amigo-invisible-ffeb0-default-rtdb.firebaseio.com";
