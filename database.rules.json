@@ -1,0 +1,13 @@
+{
+  "rules": {
+    "draws": {
+      "$draw": {
+        ".read": "$draw.length >= 20",
+        "$person": {
+          ".write": "!data.exists()",
+          ".validate": "newData.isNumber()"
+        }
+      }
+    }
+  }
+}

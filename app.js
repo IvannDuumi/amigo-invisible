@@ -23,6 +23,8 @@ let state = {
   noSecret: false,
   result: null, // {giverId: receiverId}
   sent: {}, // {giverId: true}
+  drawId: null, // id aleatorio del sorteo (para registrar aperturas)
+  opened: {}, // {giverId: timestamp}
 };
 
 /* ---------------- Persistencia ---------------- */
@@ -36,6 +38,53 @@ function load() {
 
 /* ---------------- Utilidades ---------------- */
 const uid = () => Math.random().toString(36).slice(2, 9);
+function randomId() {
+  const a = new Uint8Array(12);
+  crypto.getRandomValues(a);
+  return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/* ---------------- Aperturas (Firebase Realtime Database, vía REST) ---------------- */
+const DB = (window.FIREBASE_DB_URL || "").replace(/\/+$/, "");
+const SAFE = /^[\w-]+$/;
+
+// La persona abrió su regalo: se guarda sólo la hora, bajo ids aleatorios (sin nombres).
+function markOpened(drawId, personId) {
+  if (!DB || !SAFE.test(drawId || "") || !SAFE.test(personId || "")) return;
+  fetch(`${DB}/draws/${drawId}/${personId}.json`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Date.now()),
+  }).catch(() => {});
+}
+
+// Panel admin: escucha en vivo quién va abriendo.
+let opensSource = null;
+function watchOpens() {
+  if (opensSource) { opensSource.close(); opensSource = null; }
+  if (!DB || !state.drawId) return;
+  const apply = (path, data) => {
+    if (path === "/") state.opened = data || {};
+    else if (data) state.opened[path.slice(1)] = data;
+    save();
+    renderResults();
+  };
+  opensSource = new EventSource(`${DB}/draws/${state.drawId}.json`);
+  opensSource.addEventListener("put", (e) => { const { path, data } = JSON.parse(e.data); apply(path, data); });
+  opensSource.addEventListener("patch", (e) => {
+    const { data } = JSON.parse(e.data);
+    Object.entries(data || {}).forEach(([k, v]) => apply("/" + k, v));
+  });
+}
+
+function timeAgo(ts) {
+  const min = Math.round((Date.now() - ts) / 60000);
+  if (min < 1) return "recién";
+  if (min < 60) return `hace ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `hace ${h} h`;
+  return new Date(ts).toLocaleDateString("es-AR", { day: "numeric", month: "short" });
+}
 const person = (id) => state.people.find((p) => p.id === id);
 const colorFor = (i) => COLORS[i % COLORS.length];
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -161,6 +210,9 @@ function doDraw() {
   }
   state.result = res;
   state.sent = {};
+  state.opened = {};
+  state.drawId = randomId();
+  watchOpens();
   save();
   renderResults();
   confetti();
@@ -172,7 +224,7 @@ function doDraw() {
 function revealLink(giverId) {
   const g = person(giverId), r = person(state.result[giverId]);
   const ev = state.event;
-  const payload = { e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
+  const payload = { i: state.drawId, k: giverId, e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
   return `${location.origin}${location.pathname}#v=${encode(payload)}`;
 }
 
@@ -451,12 +503,22 @@ function renderResults() {
   const box = $("#results");
   if (!state.result || !state.people.every((p) => state.result[p.id])) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
+  const opened = state.opened || {};
+  const nOpen = state.people.filter((p) => opened[p.id]).length;
+  $("#openSummary").innerHTML = DB
+    ? `<span class="progress"><span style="width:${(nOpen / state.people.length) * 100}%"></span></span>
+       <b>${nOpen} de ${state.people.length}</b> ya abrieron su regalo ${nOpen === state.people.length ? "🎉" : ""}`
+    : `<span class="muted">Para ver quién ya abrió su enlace, configurá Firebase en <code>config.js</code>.</span>`;
   $("#resultList").innerHTML = state.people.map((p, i) => `
-    <li class="${state.sent[p.id] ? "sent" : ""}">
+    <li class="${opened[p.id] ? "opened" : state.sent[p.id] ? "sent" : ""}">
       <div class="who">
         <span class="avatar" style="background:${colorFor(i)}">${esc(p.name.charAt(0).toUpperCase())}</span>
         <div>
-          ${esc(p.name)} ${state.sent[p.id] ? "✅" : ""}
+          ${esc(p.name)}
+          ${opened[p.id]
+            ? `<span class="badge ok" title="${new Date(opened[p.id]).toLocaleString("es-AR")}">✅ Abrió · ${timeAgo(opened[p.id])}</span>`
+            : state.sent[p.id] ? `<span class="badge sent">📤 Enviado</span>`
+            : DB ? `<span class="badge wait">⏳ Sin abrir</span>` : ""}
           <div class="secret" data-secret="${p.id}">🔒 Le regala a: <b>••••••</b></div>
         </div>
       </div>
@@ -505,6 +567,7 @@ function showReveal(data) {
   $("#rvRules").classList.toggle("hidden", !(data.n || []).length);
 
   $("#giftBtn").addEventListener("click", () => {
+    markOpened(data.i, data.k);
     $("#giftBtn").classList.add("open");
     setTimeout(() => {
       $("#giftBtn").classList.add("hidden");
@@ -614,6 +677,9 @@ function bind() {
     catch (_) { toast("El link parece estar roto 😕"); }
   }
   load();
+  if (state.result && !state.drawId) { state.drawId = randomId(); save(); }
+  watchOpens();
+  setInterval(() => state.result && renderResults(), 60000); // refresca los "hace X min"
   renderEvent();
   renderPeople();
   renderResults();

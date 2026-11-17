@@ -252,3 +252,15 @@ textarea { resize: vertical; line-height: 1.5; }
 .row-btns.left { justify-content: flex-start; margin: 4px 0 8px; }
 .link-row { display: flex; gap: 6px; width: 100%; }
 .link-row input { flex: 1; min-width: 0; font-size: 12.5px; padding: 8px 10px; color: var(--muted); font-family: ui-monospace, monospace; }
+
+/* Estado de aperturas */
+.toggle small { display: block; color: var(--muted); font-weight: 600; font-size: 13px; margin-top: 2px; }
+.open-summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 10px 0; font-size: 15px; }
+.open-summary .muted { color: var(--muted); font-size: 13.5px; }
+.progress { flex: 0 0 140px; height: 10px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.progress span { display: block; height: 100%; background: linear-gradient(90deg, var(--green), #06d6a0); transition: width .4s; }
+.badge { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 9px; border-radius: 999px; margin-left: 4px; vertical-align: middle; }
+.badge.ok { background: #d8f8ef; color: #0b7a5e; }
+.badge.sent { background: #e7f0ff; color: #2f5fb3; }
+.badge.wait { background: #f1ecfa; color: var(--muted); }
+.results li.opened { border-color: #06d6a0; background: #effcf7; }

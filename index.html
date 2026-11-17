@@ -86,8 +86,10 @@
     <section class="card">
       <h2><span class="step">4</span> Reglas e indicaciones</h2>
       <div class="toggles">
-        <label class="toggle"><input type="checkbox" id="ruleCircle" /> <span>Una sola ronda (todos forman una cadena única, sin mini‑grupos)</span></label>
-        <label class="toggle"><input type="checkbox" id="ruleNoSecret" /> <span>Incluir el nombre en el mensaje de WhatsApp (si no, va un link secreto)</span></label>
+        <label class="toggle"><input type="checkbox" id="ruleCircle" />
+          <span><b>Una sola ronda</b><small>Todos forman una única cadena (Ana → Bruno → Carla → … → Ana), ideal para entregar los regalos en orden. Si queda apagado, pueden formarse grupitos que se regalan entre sí.</small></span></label>
+        <label class="toggle"><input type="checkbox" id="ruleNoSecret" />
+          <span><b>Escribir el nombre directo en el WhatsApp</b><small>Apagado (recomendado): se manda un enlace secreto y vos no ves a quién le tocó cada uno. Prendido: el nombre va en el mensaje, sin enlace.</small></span></label>
       </div>
       <label class="field">Indicaciones (una por línea)
         <textarea id="evRules" rows="6"></textarea>
@@ -105,6 +107,7 @@
     <section id="results" class="card hidden">
       <h2>🔗 Enlaces para compartir</h2>
       <p class="hint">Cada persona tiene su <b>enlace secreto</b>: al abrirlo ve sólo a quién le regala. Mandalo por WhatsApp, copialo o compartí el cartel. Los resultados están ocultos para que vos también puedas jugar.</p>
+      <p id="openSummary" class="open-summary"></p>
       <div class="row-btns left">
         <button id="copyAllBtn" class="btn btn-green" type="button">📋 Copiar todos los enlaces</button>
       </div>
@@ -150,6 +153,7 @@
   </div>
 
   <div id="toast" class="toast"></div>
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
