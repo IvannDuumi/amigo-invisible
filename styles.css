@@ -243,3 +243,12 @@ textarea { resize: vertical; line-height: 1.5; }
 /* Confetti */
 .confetti { position: fixed; top: -20px; width: 10px; height: 14px; z-index: 40; pointer-events: none; animation: fall linear forwards; }
 @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+
+/* Panel admin */
+.admin-badge {
+  display: inline-block; padding: 6px 14px; border-radius: 999px; font-weight: 800; font-size: 13px;
+  background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3); color: #fff;
+}
+.row-btns.left { justify-content: flex-start; margin: 4px 0 8px; }
+.link-row { display: flex; gap: 6px; width: 100%; }
+.link-row input { flex: 1; min-width: 0; font-size: 12.5px; padding: 8px 10px; color: var(--muted); font-family: ui-monospace, monospace; }

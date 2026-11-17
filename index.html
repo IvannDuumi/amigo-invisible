@@ -18,6 +18,7 @@
   <!-- ============ ORGANIZADOR ============ -->
   <main id="setup" class="container">
     <header class="hero">
+      <span class="admin-badge">🛠️ Panel admin · organizador</span>
       <div class="hero-emoji">🎁</div>
       <h1>Amigo Invisible</h1>
       <p>Armá el sorteo, poné las reglas y mandale a cada uno su secreto por WhatsApp.</p>
@@ -102,8 +103,11 @@
 
     <!-- Resultados -->
     <section id="results" class="card hidden">
-      <h2>🎉 ¡Sorteo listo!</h2>
-      <p class="hint">Los resultados están ocultos para que vos también puedas jugar. Mandale a cada uno su mensaje o su cartel.</p>
+      <h2>🔗 Enlaces para compartir</h2>
+      <p class="hint">Cada persona tiene su <b>enlace secreto</b>: al abrirlo ve sólo a quién le regala. Mandalo por WhatsApp, copialo o compartí el cartel. Los resultados están ocultos para que vos también puedas jugar.</p>
+      <div class="row-btns left">
+        <button id="copyAllBtn" class="btn btn-green" type="button">📋 Copiar todos los enlaces</button>
+      </div>
       <ul id="resultList" class="results"></ul>
       <div class="row-btns">
         <button id="redrawBtn" class="btn btn-ghost" type="button">🔁 Volver a sortear</button>

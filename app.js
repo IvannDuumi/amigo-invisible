@@ -204,6 +204,20 @@ function waMessage(giverId) {
   return lines.join("\n");
 }
 
+async function copyText(text, okMsg) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+  toast(okMsg);
+}
+
 function sendWhatsApp(giverId) {
   const g = person(giverId);
   const phone = (g.phone || "").replace(/\D/g, "");
@@ -451,6 +465,10 @@ function renderResults() {
         <button class="btn btn-gold icon" data-poster="${p.id}">🖼️ Cartel</button>
         <button class="btn btn-ghost icon" data-peek="${p.id}" title="Ver (¡sin espiar!)">👁️</button>
       </div>
+      <div class="link-row">
+        <input type="text" readonly value="${esc(revealLink(p.id))}" aria-label="Enlace de ${esc(p.name)}" />
+        <button class="btn btn-green icon" data-copy="${p.id}">📋 Copiar</button>
+      </div>
     </li>`).join("");
 }
 
@@ -502,9 +520,9 @@ function showReveal(data) {
 function bind() {
   const evFields = { evName: "name", evDate: "date", evPlace: "place", evMin: "min", evMax: "max", evCur: "cur", evHost: "host" };
   Object.entries(evFields).forEach(([id, key]) => {
-    $("#" + id).addEventListener("input", (e) => { state.event[key] = e.target.value; save(); });
+    $("#" + id).addEventListener("input", (e) => { state.event[key] = e.target.value; save(); renderResults(); });
   });
-  $("#evRules").addEventListener("input", (e) => { state.rules = e.target.value; save(); });
+  $("#evRules").addEventListener("input", (e) => { state.rules = e.target.value; save(); renderResults(); });
   $("#ruleCircle").addEventListener("change", (e) => { state.circle = e.target.checked; save(); });
   $("#ruleNoSecret").addEventListener("change", (e) => { state.noSecret = e.target.checked; save(); });
   $("#resetRules").addEventListener("click", () => { state.rules = DEFAULT_RULES.join("\n"); $("#evRules").value = state.rules; save(); });
@@ -548,6 +566,14 @@ function bind() {
     save(); renderExclusions(); renderResults();
   });
 
+  $("#copyAllBtn").addEventListener("click", () => {
+    const ev = state.event;
+    const txt = [`🎁 Amigo Invisible${ev.name ? ` – ${ev.name}` : ""} · enlaces secretos`, ""]
+      .concat(state.people.map((p) => `${p.name}: ${revealLink(p.id)}`))
+      .join("\n");
+    copyText(txt, "Todos los enlaces copiados 📋");
+  });
+
   $("#drawBtn").addEventListener("click", doDraw);
   $("#redrawBtn").addEventListener("click", () => {
     if (confirm("¿Volver a sortear? Los mensajes que ya mandaste van a quedar desactualizados.")) doDraw();
@@ -563,6 +589,10 @@ function bind() {
     if (!btn) return;
     if (btn.dataset.wa) sendWhatsApp(btn.dataset.wa);
     if (btn.dataset.poster) openPoster(btn.dataset.poster);
+    if (btn.dataset.copy) {
+      const p = person(btn.dataset.copy);
+      copyText(revealLink(p.id), `Enlace de ${p.name} copiado 📋`);
+    }
     if (btn.dataset.peek) {
       const id = btn.dataset.peek;
       const el = document.querySelector(`[data-secret="${id}"] b`);
