@@ -27,6 +27,7 @@ let state = {
   opened: {}, // {giverId: timestamp}
   tokens: {}, // {giverId: token corto del enlace}
   linksUploaded: false, // los datos de los enlaces cortos ya están en Firebase
+  wishKeys: {}, // {giverId: clave secreta para escribir su lista de deseos}
 };
 
 /* ---------------- Persistencia ---------------- */
@@ -221,6 +222,7 @@ function doDraw() {
   state.opened = {};
   state.drawId = shortId(10);
   state.tokens = Object.fromEntries(state.people.map((p) => [p.id, shortId(6)]));
+  state.wishKeys = Object.fromEntries(state.people.map((p) => [p.id, shortId(20)]));
   state.linksUploaded = false;
   watchOpens();
   syncLinks();
@@ -235,7 +237,7 @@ function doDraw() {
 function revealPayload(giverId) {
   const g = person(giverId), r = person(state.result[giverId]);
   const ev = state.event;
-  return { i: state.drawId, k: giverId, e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
+  return { i: state.drawId, k: giverId, ri: state.result[giverId], wk: (state.wishKeys || {})[giverId], e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
 }
 
 const baseUrl = () => `${location.origin}${location.pathname}`;
@@ -252,6 +254,15 @@ let syncTimer = null;
 async function syncLinks() {
   if (!DB || !state.result || !state.tokens) return;
   setSyncStatus("☁️ Guardando enlaces…");
+  await Promise.all(state.people.map((p) => {
+    const wk = (state.wishKeys || {})[p.id];
+    if (!wk) return null;
+    return fetch(`${DB}/wkeys/${state.drawId}/${p.id}.json`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(wk),
+    }).catch(() => {});
+  }));
   try {
     await Promise.all(state.people.map((p) =>
       fetch(`${DB}/links/${state.drawId}/${state.tokens[p.id]}.json`, {
@@ -617,6 +628,8 @@ function showReveal(data) {
   $("#rvInfo").innerHTML = chips.map((c) => `<span>${esc(c)}</span>`).join("");
   $("#rvRules").innerHTML = (data.n || []).map((r) => `<li>${esc(r)}</li>`).join("");
   $("#rvRules").classList.toggle("hidden", !(data.n || []).length);
+  startCountdown(data.d);
+  setupWishes(data);
 
   $("#giftBtn").addEventListener("click", () => {
     markOpened(data.i, data.k);
@@ -626,9 +639,84 @@ function showReveal(data) {
       document.querySelector(".tap").classList.add("hidden");
       document.querySelector(".reveal-card > .reveal-sub").classList.add("hidden");
       $("#rvResult").classList.remove("hidden");
+      if (wishesReady) {
+        $("#wishes").classList.remove("hidden");
+        $("#wishCta").classList.remove("hidden");
+      }
       confetti();
     }, 450);
   }, { once: true });
+}
+
+/* ---------------- Cuenta regresiva ---------------- */
+function startCountdown(iso) {
+  const box = $("#countdown");
+  if (!iso) { box.classList.add("hidden"); return; }
+  const [y, m, d] = iso.split("-").map(Number);
+  const target = new Date(y, m - 1, d, 0, 0, 0).getTime();
+  const unit = (n, label) => `<div class="cd-unit"><b>${String(n).padStart(2, "0")}</b><span>${label}</span></div>`;
+  const tick = () => {
+    const diff = target - Date.now();
+    if (diff <= 0) {
+      box.innerHTML = `<p class="cd-title">🎄 ¡Llegó el día! ¡A abrir los regalos! 🎉</p>`;
+      clearInterval(timer);
+      return;
+    }
+    const s = Math.floor(diff / 1000);
+    box.innerHTML = `<p class="cd-title">⏳ Faltan para el intercambio</p>
+      <div class="cd-units">${unit(Math.floor(s / 86400), "días")}${unit(Math.floor((s % 86400) / 3600), "horas")}${unit(Math.floor((s % 3600) / 60), "min")}${unit(s % 60, "seg")}</div>`;
+  };
+  const timer = setInterval(tick, 1000);
+  tick();
+  box.classList.remove("hidden");
+}
+
+/* ---------------- Lista de deseos ---------------- */
+let wishesReady = false;
+async function setupWishes(data) {
+  const ok = DB && SAFE.test(data.i || "") && SAFE.test(data.k || "") && SAFE.test(data.ri || "") && data.wk;
+  if (!ok) return;
+  wishesReady = true; // se muestra recién al abrir el regalo (si no, el título delataría el nombre)
+  const get = (pid) => fetch(`${DB}/wishes/${data.i}/${pid}/w.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+
+  // Pistas de la persona a la que le regalo
+  $("#hintsTitle").textContent = `🎁 Pistas de ${data.r}`;
+  const showHints = async () => {
+    const w = await get(data.ri);
+    $("#hintsText").innerHTML = w
+      ? esc(w).replace(/\n/g, "<br>")
+      : `<span class="muted">${esc(data.r)} todavía no escribió su lista… ¡volvé en unos días! 👀</span>`;
+  };
+  showHints();
+
+  $("#wishCta").addEventListener("click", () => {
+    $("#wishes").scrollIntoView({ behavior: "smooth", block: "start" });
+    setTimeout(() => $("#wishText").focus(), 500);
+  });
+
+  // Mi propia lista
+  const mine = await get(data.k);
+  if (mine) {
+    $("#wishText").value = mine;
+    $("#wishCta").textContent = "📝 Ver o editar mi lista de deseos";
+  }
+  $("#wishSave").addEventListener("click", async () => {
+    const w = $("#wishText").value.trim().slice(0, 600);
+    $("#wishSave").disabled = true;
+    try {
+      const res = await fetch(`${DB}/wishes/${data.i}/${data.k}.json`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ w, k: data.wk }),
+      });
+      if (!res.ok) throw new Error(res.status);
+      toast("¡Lista guardada! Tu amigo invisible ya la puede ver 🎁");
+      $("#wishCta").textContent = "📝 Ver o editar mi lista de deseos";
+    } catch (_) {
+      toast("No se pudo guardar 😕 Probá de nuevo en un rato.");
+    }
+    $("#wishSave").disabled = false;
+  });
 }
 
 /* ---------------- Eventos ---------------- */
@@ -749,12 +837,16 @@ function bind() {
   }
   load();
   if (state.result && !state.drawId) { state.drawId = randomId(); save(); }
-  if (state.result && DB && !state.linksUploaded) {
-    // Sorteo hecho antes de los enlaces cortos: se les crean tokens y se suben.
-    if (!state.tokens || !state.people.every((p) => state.tokens[p.id])) {
+  if (state.result && DB) {
+    // Sorteo hecho antes de los enlaces cortos: se les crean tokens (sólo si nunca se subieron).
+    if (!state.linksUploaded && (!state.tokens || !state.people.every((p) => state.tokens[p.id]))) {
       state.tokens = Object.fromEntries(state.people.map((p) => [p.id, shortId(6)]));
     }
+    // Claves de lista de deseos para sorteos anteriores a esta función.
+    state.wishKeys = state.wishKeys || {};
+    state.people.forEach((p) => { if (!state.wishKeys[p.id]) state.wishKeys[p.id] = shortId(20); });
     save();
+    // Se vuelven a subir los datos: los enlaces ya enviados reciben las novedades sin cambiar.
     syncLinks();
   }
   watchOpens();

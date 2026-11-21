@@ -17,6 +17,27 @@
           ".validate": "newData.isString() && newData.val().length < 8000"
         }
       }
+    },
+    "wkeys": {
+      "$draw": {
+        "$person": {
+          ".write": "!data.exists()",
+          ".validate": "newData.isString() && newData.val().length >= 16"
+        }
+      }
+    },
+    "wishes": {
+      "$draw": {
+        "$person": {
+          ".write": "newData.exists() && root.child('wkeys').child($draw).child($person).val() === newData.child('k').val()",
+          "w": {
+            ".read": true,
+            ".validate": "newData.isString() && newData.val().length <= 600"
+          },
+          "k": { ".validate": "newData.isString()" },
+          "$other": { ".validate": false }
+        }
+      }
     }
   }
 }
