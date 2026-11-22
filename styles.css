@@ -316,3 +316,6 @@ body > main { flex: 1 0 auto; width: 100%; }
 .my-wish textarea { font-size: 17px; min-height: 130px; }
 .wish-save { font-size: 20px; padding: 16px 20px; }
 .hints { margin: 22px 0 0; }
+
+.badge.change { background: #fff1d6; color: #b35c00; }
+.results li.changed { border-color: var(--gold); background: #fffaf0; }

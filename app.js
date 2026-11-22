@@ -28,6 +28,8 @@ let state = {
   tokens: {}, // {giverId: token corto del enlace}
   linksUploaded: false, // los datos de los enlaces cortos ya están en Firebase
   wishKeys: {}, // {giverId: clave secreta para escribir su lista de deseos}
+  openKeys: {}, // {giverId: clave de apertura nueva} (cuando le cambió el amigo invisible)
+  changed: {}, // {giverId: timestamp} personas a las que les cambió el amigo invisible
 };
 
 /* ---------------- Persistencia ---------------- */
@@ -237,7 +239,44 @@ function doDraw() {
 function revealPayload(giverId) {
   const g = person(giverId), r = person(state.result[giverId]);
   const ev = state.event;
-  return { i: state.drawId, k: giverId, ri: state.result[giverId], wk: (state.wishKeys || {})[giverId], e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
+  return { i: state.drawId, k: openKey(giverId), wid: giverId, ri: state.result[giverId], wk: (state.wishKeys || {})[giverId], e: ev.name, g: g.name, r: r.name, d: ev.date, p: ev.place, b: budgetText(ev), h: ev.host, n: rulesList() };
+}
+
+const openKey = (pid) => (state.openKeys || {})[pid] || pid;
+const needsReopen = (pid) => (state.changed || {})[pid] && !(state.opened || {})[openKey(pid)];
+
+// Suma a alguien después del sorteo sin volver a sortear: una persona X (al azar)
+// pasa a regalarle a la nueva, y la nueva le regala a quien le tocaba a X.
+function insertPerson(np) {
+  const givers = shuffle(state.people.map((p) => p.id).filter((id) => id !== np.id));
+  const x = givers.find((g) => allowed(g, np.id) && allowed(np.id, state.result[g]));
+  if (!x) return false;
+  state.result[np.id] = state.result[x];
+  state.result[x] = np.id;
+  state.tokens = state.tokens || {};
+  state.wishKeys = state.wishKeys || {};
+  state.openKeys = state.openKeys || {};
+  state.changed = state.changed || {};
+  state.tokens[np.id] = shortId(6);
+  state.wishKeys[np.id] = shortId(20);
+  state.openKeys[x] = `${x}r${shortId(4)}`;
+  state.changed[x] = Date.now();
+  delete state.sent[x];
+  return true;
+}
+
+function changeMessage(giverId) {
+  const g = person(giverId);
+  const ev = state.event;
+  return [
+    `🎁 *¡Hola ${g.name}!*`,
+    `Hubo un cambio en el *Amigo Invisible${ev.name ? ` – ${ev.name}` : ""}*: se sumó una persona y *te tocó alguien nuevo* 🔄`,
+    "",
+    "👉 Volvé a abrir tu enlace y tocá el regalo para ver a quién le regalás ahora:",
+    revealLink(giverId),
+    "",
+    "🤫 ¡Sigue siendo secreto!",
+  ].join("\n");
 }
 
 const baseUrl = () => `${location.origin}${location.pathname}`;
@@ -336,7 +375,8 @@ async function copyText(text, okMsg) {
 function sendWhatsApp(giverId) {
   const g = person(giverId);
   const phone = (g.phone || "").replace(/\D/g, "");
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(waMessage(giverId))}`;
+  const msg = needsReopen(giverId) ? changeMessage(giverId) : waMessage(giverId);
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
   window.open(url, "_blank");
   state.sent[giverId] = true;
   save();
@@ -567,19 +607,22 @@ function renderResults() {
   if (!state.result || !state.people.every((p) => state.result[p.id])) { box.classList.add("hidden"); return; }
   box.classList.remove("hidden");
   const opened = state.opened || {};
-  const nOpen = state.people.filter((p) => opened[p.id]).length;
+  const op = (pid) => opened[openKey(pid)];
+  const nOpen = state.people.filter((p) => op(p.id)).length;
   $("#openSummary").innerHTML = DB
     ? `<span class="progress"><span style="width:${(nOpen / state.people.length) * 100}%"></span></span>
        <b>${nOpen} de ${state.people.length}</b> ya abrieron su regalo ${nOpen === state.people.length ? "🎉" : ""}`
     : `<span class="muted">Para ver quién ya abrió su enlace, configurá Firebase en <code>config.js</code>.</span>`;
   $("#resultList").innerHTML = state.people.map((p, i) => `
-    <li class="${opened[p.id] ? "opened" : state.sent[p.id] ? "sent" : ""}">
+    <li class="${needsReopen(p.id) ? "changed" : op(p.id) ? "opened" : state.sent[p.id] ? "sent" : ""}">
       <div class="who">
         <span class="avatar" style="background:${colorFor(i)}">${esc(p.name.charAt(0).toUpperCase())}</span>
         <div>
           ${esc(p.name)}
-          ${opened[p.id]
-            ? `<span class="badge ok" title="${new Date(opened[p.id]).toLocaleString("es-AR")}">✅ Abrió · ${timeAgo(opened[p.id])}</span>`
+          ${needsReopen(p.id)
+            ? `<span class="badge change">🔄 Le cambió: avisale que vuelva a abrir</span>`
+            : op(p.id)
+            ? `<span class="badge ok" title="${new Date(op(p.id)).toLocaleString("es-AR")}">✅ Abrió · ${timeAgo(op(p.id))}</span>`
             : state.sent[p.id] ? `<span class="badge sent">📤 Enviado</span>`
             : DB ? `<span class="badge wait">⏳ Sin abrir</span>` : ""}
           <div class="secret" data-secret="${p.id}">🔒 Le regala a: <b>••••••</b></div>
@@ -674,7 +717,8 @@ function startCountdown(iso) {
 /* ---------------- Lista de deseos ---------------- */
 let wishesReady = false;
 async function setupWishes(data) {
-  const ok = DB && SAFE.test(data.i || "") && SAFE.test(data.k || "") && SAFE.test(data.ri || "") && data.wk;
+  const me = data.wid || data.k;
+  const ok = DB && SAFE.test(data.i || "") && SAFE.test(me || "") && SAFE.test(data.ri || "") && data.wk;
   if (!ok) return;
   wishesReady = true; // se muestra recién al abrir el regalo (si no, el título delataría el nombre)
   const get = (pid) => fetch(`${DB}/wishes/${data.i}/${pid}/w.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -695,7 +739,7 @@ async function setupWishes(data) {
   });
 
   // Mi propia lista
-  const mine = await get(data.k);
+  const mine = await get(me);
   if (mine) {
     $("#wishText").value = mine;
     $("#wishCta").textContent = "📝 Ver o editar mi lista de deseos";
@@ -704,7 +748,7 @@ async function setupWishes(data) {
     const w = $("#wishText").value.trim().slice(0, 600);
     $("#wishSave").disabled = true;
     try {
-      const res = await fetch(`${DB}/wishes/${data.i}/${data.k}.json`, {
+      const res = await fetch(`${DB}/wishes/${data.i}/${me}.json`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ w, k: data.wk }),
@@ -736,7 +780,23 @@ function bind() {
     const phone = $("#pPhone").value.replace(/[^\d]/g, "");
     if (!name) return;
     if (state.people.some((p) => p.name.toLowerCase() === name.toLowerCase())) { toast("Ese nombre ya está en la lista"); return; }
-    state.people.push({ id: uid(), name, phone });
+    const np = { id: uid(), name, phone };
+    if (state.result) {
+      const okAdd = confirm(`Ya hiciste el sorteo. ¿Sumar a ${name} sin volver a sortear?\n\nA UNA sola persona (elegida al azar) le va a cambiar su amigo invisible: le va a tocar ${name}. Vas a tener que avisarle que vuelva a abrir su enlace (es el mismo). Los demás quedan igual.`);
+      if (!okAdd) return;
+      state.people.push(np);
+      if (!insertPerson(np)) {
+        state.people.pop();
+        toast("No se pudo sumar respetando las exclusiones 😕");
+        return;
+      }
+      save(); renderPeople(); renderResults(); syncLinks();
+      $("#pName").value = ""; $("#pPhone").value = "";
+      toast(`¡${name} sumado/a! Mandale su enlace y avisale a la persona marcada con 🔄`);
+      $("#results").scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    state.people.push(np);
     state.result = null;
     save(); renderPeople(); renderResults();
     $("#pName").value = ""; $("#pPhone").value = ""; $("#pName").focus();
@@ -745,6 +805,7 @@ function bind() {
   $("#people").addEventListener("click", (e) => {
     const id = e.target.dataset.del;
     if (!id) return;
+    if (state.result && !confirm("⚠️ Esto borra el sorteo actual: vas a tener que sortear de nuevo y mandar TODOS los enlaces otra vez. ¿Seguro?")) return;
     state.people = state.people.filter((p) => p.id !== id);
     state.exclusions = state.exclusions.filter(([a, b]) => a !== id && b !== id);
     state.result = null;
@@ -756,6 +817,7 @@ function bind() {
     if (!a || !b) { toast("Elegí a las dos personas"); return; }
     if (a === b) { toast("Tienen que ser dos personas distintas"); return; }
     if (isExcluded(a, b)) { toast("Esa exclusión ya existe"); return; }
+    if (state.result && !confirm("⚠️ Esto borra el sorteo actual: vas a tener que sortear de nuevo y mandar TODOS los enlaces otra vez. ¿Seguro?")) return;
     state.exclusions.push([a, b]);
     state.result = null;
     save(); renderExclusions(); renderResults();
@@ -764,6 +826,7 @@ function bind() {
   $("#exclusions").addEventListener("click", (e) => {
     const i = e.target.dataset.delex;
     if (i === undefined) return;
+    if (state.result && !confirm("⚠️ Esto borra el sorteo actual: vas a tener que sortear de nuevo y mandar TODOS los enlaces otra vez. ¿Seguro?")) return;
     state.exclusions.splice(Number(i), 1);
     state.result = null;
     save(); renderExclusions(); renderResults();
